@@ -41,7 +41,7 @@ export async function POST(request: NextRequest, { params }: { params: { slug: s
       tenant: upgradedTenant,
     });
   } catch (err: any) {
-    console.error(err); // Good practice to log the error for debugging
+    console.error(err)
     return new NextResponse(JSON.stringify({ error: 'Unauthorized or invalid request.' }), { status: 401 });
   }
 }
