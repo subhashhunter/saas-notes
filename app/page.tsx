@@ -1,103 +1,340 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect } from 'react';
+
+
+interface User {
+  id: number;
+  email: string;
+  role: 'ADMIN' | 'MEMBER';
+  tenant: {
+    id: number;
+    slug: string;
+    plan: 'FREE' | 'PRO';
+  };
+}
+
+interface Note {
+  id: number;
+  title: string;
+  content: string;
+  tenantId: number;
+  ownerId: number;
+  createdAt: string;
+}
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [noteLimitMessage, setNoteLimitMessage] = useState('');
+  const [error, setError] = useState('');
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+
+    if (storedToken && storedUser) {
+      setToken(storedToken);
+      setUser(JSON.parse(storedUser));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (token && user) {
+      fetchNotes();
+    }
+  }, [token, user]);
+
+  const handleLogin = async (email: string) => {
+    setError('');
+    const password = 'password';
+    try {
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Login failed');
+      }
+
+      const data = await response.json();
+      setToken(data.token);
+      setUser(data.user);
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+    } catch (err: any) {
+      setError('Login failed. Check your credentials.');
+    }
+  };
+
+  const fetchNotes = async () => {
+    if (!token || !user) return;
+    try {
+        const response = await fetch('/api/notes', {
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            setNotes(data);
+            if (user.tenant.plan === 'FREE' && data.length >= 3) {
+                setNoteLimitMessage('Upgrade to Pro to create more notes!');
+            } else {
+                setNoteLimitMessage('');
+            }
+        }
+    } catch (err) {
+        console.error('Failed to fetch notes:', err);
+    }
+};
+
+
+  const handleCreateNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!newNoteTitle) {
+        setError('Note title is required.');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notes', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                title: newNoteTitle,
+                content: newNoteContent,
+            }),
+        });
+
+        // The only change is to remove the 'if (response.status === 403)' block
+        // The fetchNotes call will now handle setting the message if a 403 occurred.
+        if (response.ok) {
+            await fetchNotes();
+            setNewNoteTitle('');
+            setNewNoteContent('');
+        } else {
+            throw new Error('Failed to create note');
+        }
+    } catch (err) {
+        setError('Failed to create note.');
+    }
+};
+  const handleDeleteNote = async (id: number) => {
+    try {
+      const response = await fetch(`/api/notes/${id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.status === 204) {
+        await fetchNotes();
+      } else {
+        throw new Error('Failed to delete note');
+      }
+    } catch (err) {
+      setError('Failed to delete note.');
+    }
+  };
+
+  const handleUpgrade = async () => {
+    if (!user || user.role !== 'ADMIN') return;
+
+    try {
+      const response = await fetch(
+        `/api/tenants/${user.tenant.slug}/upgrade`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      if (response.ok) {
+        const updatedUser = {
+          ...user,
+          tenant: { ...user.tenant, plan: 'PRO' as const },
+        };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        setNoteLimitMessage('Tenant upgraded to PRO! You now have unlimited notes. 🎉');
+      } else {
+        throw new Error('Upgrade failed');
+      }
+    } catch (err) {
+      setError('Failed to upgrade tenant.');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+    setNotes([]);
+    setNoteLimitMessage('');
+    setError('');
+  };
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+        <h1 className="text-3xl font-bold mb-8 text-gray-800">Login</h1>
+        <div className="flex flex-col space-y-4 w-80">
+          <button
+            onClick={() => handleLogin('admin@acme.test')}
+            className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition duration-300"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            Login as Admin (Acme)
+          </button>
+          <button
+            onClick={() => handleLogin('user@acme.test')}
+            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition duration-300"
           >
-            Read our docs
-          </a>
+            Login as User (Acme)
+          </button>
+          <button
+            onClick={() => handleLogin('admin@globex.test')}
+            className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition duration-300"
+          >
+            Login as Admin (Globex)
+          </button>
+          <button
+            onClick={() => handleLogin('user@globex.test')}
+            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition duration-300"
+          >
+            Login as User (Globex)
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-50 min-h-screen p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-8">
+          <h1 className="text-4xl font-extrabold text-gray-900 mb-4 md:mb-0">
+            {user.tenant.slug} Notes
+          </h1>
+          <div className="flex items-center space-x-4">
+            <span className="text-md text-gray-600">
+              Logged in as: <strong className="text-gray-900">{user.email}</strong> ({user.role})
+            </span>
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 transition duration-300"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        {user.role === 'ADMIN' && user.tenant.plan === 'FREE' && (
+          <div className="mb-6 p-6 border border-yellow-200 rounded-xl bg-yellow-50 text-yellow-800 shadow-sm">
+            <h2 className="text-2xl font-bold mb-2">Admin Panel</h2>
+            <p className="mb-4">
+              Your current plan is **Free**. Upgrade to Pro for unlimited notes.
+            </p>
+            <button
+              onClick={handleUpgrade}
+              className="px-6 py-3 bg-purple-600 text-white font-semibold rounded-md hover:bg-purple-700 transition duration-300"
+            >
+              Upgrade to Pro
+            </button>
+          </div>
+        )}
+
+        {user.tenant.plan === 'PRO' && (
+          <div className="mb-6 p-6 border border-green-200 rounded-xl bg-green-50 text-green-800 shadow-sm">
+            <p className="font-semibold">You are on the **PRO** plan. Enjoy unlimited notes! 🚀</p>
+          </div>
+        )}
+
+        {noteLimitMessage && (
+          <div className="p-4 mb-4 text-center bg-red-100 text-red-700 rounded-md">
+            {noteLimitMessage}
+          </div>
+        )}
+        {error && (
+          <div className="p-4 mb-4 text-center bg-red-100 text-red-700 rounded-md">
+            {error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          
+          <div className="p-8 bg-white shadow-xl rounded-xl h-min">
+            <h2 className="text-2xl font-bold mb-6 text-gray-800">Create a new note</h2>
+            <form onSubmit={handleCreateNote} className="space-y-6">
+              <input
+                type="text"
+                placeholder="Note title"
+                value={newNoteTitle}
+                onChange={(e) => setNewNoteTitle(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+              <textarea
+                placeholder="Note content"
+                value={newNoteContent}
+                onChange={(e) => setNewNoteContent(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg h-32 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              ></textarea>
+              <button
+                type="submit"
+                className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition duration-300"
+              >
+                Create Note
+              </button>
+            </form>
+          </div>
+
+          
+          <div className="p-8 bg-white shadow-xl rounded-xl">
+            <h2 className="text-2xl font-bold mb-6 text-gray-800">Your Notes</h2>
+            <ul className="space-y-4">
+              {notes.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">No notes yet. Create one above! 📝</p>
+              ) : (
+                notes.map((note) => (
+                  <li
+                    key={note.id}
+                    className="p-4 border border-gray-200 rounded-lg flex justify-between items-center transition-all hover:bg-gray-50"
+                  >
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800">{note.title}</h3>
+                      <p className="text-gray-500 text-sm mt-1">{note.content}</p>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteNote(note.id)}
+                      className="ml-4 px-3 py-1 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 transition duration-300"
+                    >
+                      Delete
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
