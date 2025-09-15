@@ -1,10 +1,6 @@
 
-
-Here's a draft for your README.md file. You'll need to fill in the specifics regarding your chosen multi-tenancy approach and potentially add more detailed technical explanations if desired.
-
 SaaS Notes Application
 This project is a SaaS Notes application designed with multi-tenancy, robust authentication, and feature gating based on subscription plans.
-
 
 Features
 
